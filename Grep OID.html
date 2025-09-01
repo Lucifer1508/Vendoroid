@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Grep Tool with GitHub Scraping</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            text-align: center;
+            color: #444;
+        }
+        .controls, .search-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        textarea {
+            width: 100%;
+            height: 250px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+        }
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            min-height: 50px;
+        }
+        .status {
+            text-align: center;
+            font-style: italic;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Live Grep Tool</h1>
+        <h2>Load Content from GitHub</h2>
+
+        <div class="controls">
+            <input type="text" id="github-url" placeholder="Paste a GitHub file URL here...">
+            <button onclick="loadFromGitHub()">Load Content</button>
+        </div>
+
+        <textarea id="data-input" readonly placeholder="File content will appear here after loading..."></textarea>
+        
+        <div class="search-container">
+            <input type="text" id="search-input" oninput="performSearch()" placeholder="Start typing to search live...">
+        </div>
+
+        <div id="results">
+            <p class="status">Load a file from GitHub and start searching.</p>
+        </div>
+    </div>
+
+    <script>
+        async function loadFromGitHub() {
+            const url = document.getElementById('github-url').value.trim();
+            const resultsDiv = document.getElementById('results');
+            const dataTextArea = document.getElementById('data-input');
+            
+            if (!url) {
+                resultsDiv.innerHTML = '<p class="status" style="color: red;">Please enter a GitHub URL.</p>';
+                return;
+            }
+
+            const rawUrl = convertToRawGitHubUrl(url);
+            if (!rawUrl) {
+                resultsDiv.innerHTML = '<p class="status" style="color: red;">Invalid GitHub file URL.</p>';
+                return;
+            }
+            
+            resultsDiv.innerHTML = '<p class="status">Loading content...</p>';
+            dataTextArea.value = '';
+
+            try {
+                const response = await fetch(rawUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+                }
+                const content = await response.text();
+                dataTextArea.value = content;
+                resultsDiv.innerHTML = '<p class="status">Content loaded successfully. You can now search.</p>';
+                performSearch();
+            } catch (error) {
+                resultsDiv.innerHTML = `<p class="status" style="color: red;">Error: ${error.message}</p>`;
+                console.error("Fetch error:", error);
+            }
+        }
+
+        function convertToRawGitHubUrl(url) {
+            try {
+                const urlObj = new URL(url);
+                if (urlObj.hostname === 'github.com') {
+                    const path = urlObj.pathname;
+                    const newPath = path.replace('/blob/', '/');
+                    return `https://raw.githubusercontent.com${newPath}`;
+                }
+                return null; // Not a standard GitHub URL
+            } catch (e) {
+                return null; // Invalid URL
+            }
+        }
+        
+        function parseData(text) {
+            const lines = text.split('\n');
+            const data = [];
+            const idRegex = /I="([^"]+)"/;
+            const nameRegex = /N="([^"]+)"/;
+
+            lines.forEach(line => {
+                const idMatch = line.match(idRegex);
+                const nameMatch = line.match(nameRegex);
+                if (idMatch && nameMatch) {
+                    data.push({
+                        id: idMatch[1].trim(),
+                        name: new DOMParser().parseFromString(nameMatch[1], "text/html").documentElement.textContent.trim()
+                    });
+                }
+            });
+            return data;
+        }
+
+        function performSearch() {
+            const dataContent = document.getElementById('data-input').value;
+            const searchTerm = document.getElementById('search-input').value.trim();
+            const resultsDiv = document.getElementById('results');
+
+            if (!dataContent.trim()) {
+                if (document.getElementById('github-url').value) {
+                     resultsDiv.innerHTML = '<p class="status">Content loaded. Start typing to search.</p>';
+                } else {
+                     resultsDiv.innerHTML = '<p class="status">Load a file from GitHub and start searching.</p>';
+                }
+                return;
+            }
+            if (!searchTerm) {
+                resultsDiv.innerHTML = '<p class="status">Results will appear here as you type...</p>';
+                return;
+            }
+
+            const parsedData = parseData(dataContent);
+            let found = false;
+            let resultHTML = '';
+            const lowerCaseSearchTerm = searchTerm.toLowerCase();
+
+            parsedData.forEach(item => {
+                if (item.id.toLowerCase().includes(lowerCaseSearchTerm)) {
+                    resultHTML += `<p>Match for ID <strong>"${item.id}"</strong> &rarr; Name: <strong>${item.name}</strong></p>`;
+                    found = true;
+                } else if (item.name.toLowerCase().includes(lowerCaseSearchTerm)) {
+                    resultHTML += `<p>Match for Name <strong>"${item.name}"</strong> &rarr; ID: <strong>${item.id}</strong></p>`;
+                    found = true;
+                }
+            });
+
+            if (found) {
+                resultsDiv.innerHTML = resultHTML;
+            } else {
+                resultsDiv.innerHTML = `<p>No match found for "<strong>${searchTerm}</strong>".</p>`;
+            }
+        }
+    </script>
+
+</body>
+</html>
